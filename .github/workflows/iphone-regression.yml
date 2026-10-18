@@ -1,4 +1,4 @@
-name: iPhone regression verification (fork only)
+name: Core regression verification (fork only)
 on:
   push:
     branches: [ci/iphone-regression-check]
@@ -6,26 +6,32 @@ on:
 permissions:
   contents: read
 jobs:
-  ios-tests:
+  core-tests:
     runs-on: macos-26
-    timeout-minutes: 25
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        revision: [base, candidate]
     steps:
       - uses: actions/checkout@v4
-      - name: Inspect Apple toolchain
+        with:
+          fetch-depth: 0
+      - name: Use pinned upstream production for regression-red
+        if: matrix.revision == 'base'
+        run: git restore --source=e1bc576b5692144b64b9740777151287da9d104c -- Packages/VoryCore/Sources/VoryCore/Runtime/ChatRegistry.swift Packages/VoryCore/Sources/VoryCore/Runtime/GatewayRuntime.swift
+      - name: Prepare existing tests against complete production core
         run: |
-          xcodebuild -version
           swift --version
-          xcrun simctl list devices available
-      - name: Unit tests on iPhone simulator
-        run: |
-          set -o pipefail
-          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for devices in d["devices"].values() for x in devices if x["name"].startswith("iPhone")))')
-          xcodebuild test -project Vory.xcodeproj -scheme Vory -destination "platform=iOS Simulator,id=$DEVICE" -only-testing:VoryTests -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO -resultBundlePath TestResults.xcresult > xcodebuild.log 2>&1 || { tail -n 120 xcodebuild.log; exit 1; }
-          tail -n 80 xcodebuild.log
+          python3 ci/prepare-core-tests.py
+      - name: Run regressions
+        env:
+          REVISION: ${{ matrix.revision }}
+        run: python3 ci/run-core-tests.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: xcode-results
+          name: core-results-${{ matrix.revision }}
           path: |
-            xcodebuild.log
-            TestResults.xcresult
+            core-tests.log
+            core-results.json
