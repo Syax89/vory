@@ -1,0 +1,31 @@
+name: iPhone regression verification (fork only)
+on:
+  push:
+    branches: [ci/iphone-regression-check]
+# Fork-only push job: no secrets or event text enters shell commands.
+permissions:
+  contents: read
+jobs:
+  ios-tests:
+    runs-on: macos-26
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect Apple toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          xcrun simctl list devices available
+      - name: Unit tests on iPhone simulator
+        run: |
+          set -o pipefail
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for devices in d["devices"].values() for x in devices if x["name"].startswith("iPhone")))')
+          xcodebuild test -project Vory.xcodeproj -scheme Vory -destination "platform=iOS Simulator,id=$DEVICE" -only-testing:VoryTests -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO -resultBundlePath TestResults.xcresult > xcodebuild.log 2>&1 || { tail -n 120 xcodebuild.log; exit 1; }
+          tail -n 80 xcodebuild.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: xcode-results
+          path: |
+            xcodebuild.log
+            TestResults.xcresult
